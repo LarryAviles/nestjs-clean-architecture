@@ -1,12 +1,7 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { TaskOrmEntity } from './persistence/task.orm-entity';
-import { TypeOrmTaskRepository } from './persistence/typeorm-task.repository';
-import {
-  TASK_REPOSITORY,
-  TaskRepository,
-} from '../domain/repositories/task.repository';
+import { InMemoryTaskRepository } from './persistence/in-memory-task.repository';
+import { TASK_REPOSITORY, TaskRepository } from '../domain/repositories/task.repository';
 import { CreateTaskUseCase } from '../application/use-cases/create-task.use-case';
 import { ListTasksUseCase } from '../application/use-cases/list-tasks.use-case';
 import { GetTaskUseCase } from '../application/use-cases/get-task.use-case';
@@ -18,15 +13,19 @@ import { AuthModule } from '../../auth/infrastructure/auth.module';
 /**
  * Composition root for the tasks bounded context.
  *
- * `AuthModule` is imported solely to bring in `JwtAuthGuard` and the
- * `TOKEN_GENERATOR` provider that guard depends on. Tasks knows nothing
- * about how auth is implemented — only that it gets a guard.
+ * To swap the in-memory store for a real database: implement `TaskRepository`
+ * in a new adapter class and change the single `useClass` binding below.
+ * Nothing in domain/ or application/ needs to change.
+ *
+ * AuthModule is imported solely to bring in JwtAuthGuard and the
+ * TOKEN_GENERATOR it depends on. Tasks knows nothing about auth internals.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([TaskOrmEntity]), AuthModule],
+  imports: [AuthModule],
   controllers: [TasksController],
   providers: [
-    { provide: TASK_REPOSITORY, useClass: TypeOrmTaskRepository },
+    // Change useClass here to swap to a DB-backed adapter
+    { provide: TASK_REPOSITORY, useClass: InMemoryTaskRepository },
 
     {
       provide: CreateTaskUseCase,

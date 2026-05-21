@@ -4,10 +4,6 @@ import { IsInt, IsNotEmpty, IsString, Min, validateSync } from 'class-validator'
 class EnvSchema {
   @IsString()
   @IsNotEmpty()
-  DATABASE_URL!: string;
-
-  @IsString()
-  @IsNotEmpty()
   JWT_SECRET!: string;
 
   @IsString()
