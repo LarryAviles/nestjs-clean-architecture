@@ -1,11 +1,11 @@
-# Clean Architecture in NestJS — auth + tasks
+# Clean Architecture en NestJS — auth + tasks
 
-A NestJS backend showcasing strict Clean Architecture, SOLID, and purposeful
-design patterns. Two bounded contexts (`auth`, `tasks`) plus a `shared`
-kernel, four layers each (`domain`, `application`, `infrastructure`,
-`presentation`).
+Backend en NestJS que demuestra Clean Architecture estricta, SOLID y patrones
+de diseño aplicados con propósito. Dos contextos delimitados (`auth`, `tasks`)
+más un núcleo `shared`, con cuatro capas cada uno (`domain`, `application`,
+`infrastructure`, `presentation`).
 
-## Layer dependencies
+## Dependencias entre capas
 
 ```
             ┌───────────────────────┐
@@ -25,124 +25,127 @@ kernel, four layers each (`domain`, `application`, `infrastructure`,
             │ (entities, VOs, errs) │
             └───────────────────────┘
                       ▲
-                      │ implements ports
+                      │ implementa los ports
             ┌─────────┴─────────────┐
             │    infrastructure     │
             │ (ORM, JWT, bcrypt)    │
             └───────────────────────┘
 ```
 
-- `domain` imports from no one.
-- `application` imports only from `domain`. **No `@nestjs/*`, no `typeorm`.**
-- `infrastructure` implements domain/application ports. Knows TypeORM, JWT, bcrypt.
-- `presentation` calls use cases and uses guards/decorators. Does not touch
-  `infrastructure/persistence/*` or `services/*` directly.
+- `domain` no importa de nadie.
+- `application` importa únicamente de `domain`. **Sin `@nestjs/*`, sin `typeorm`.**
+- `infrastructure` implementa los ports de domain/application. Conoce TypeORM, JWT y bcrypt.
+- `presentation` invoca use cases y usa guards/decoradores. No toca
+  `infrastructure/persistence/*` ni `services/*` directamente.
 
-## Patterns applied and why
+## Patrones aplicados y por qué
 
-- **Repository** (`domain/repositories/` interface, `infrastructure/persistence/*.repository.ts` adapter)
-  isolates the domain from TypeORM. The same interface is satisfied by an
-  in-memory fake used in tests — no database needed.
+- **Repository** (interfaz en `domain/repositories/`, adaptador en
+  `infrastructure/persistence/*.repository.ts`) aísla el dominio de TypeORM.
+  La misma interfaz se satisface con un fake en memoria usado en los tests —
+  no hace falta base de datos.
 
-- **Use Case** (`application/use-cases/*.use-case.ts`, single `execute()`):
-  one operation = one class. SRP. Easy to wire alone or compose, and the
-  controller is a pass-through.
+- **Use Case** (`application/use-cases/*.use-case.ts`, un único `execute()`):
+  una operación = una clase. SRP. Fácil de invocar de forma aislada o
+  componer, y el controller queda como un simple pasamanos.
 
-- **Value Object** (`Email`, `Password`, `Uuid`): self-validating, immutable
-  primitives. Invalid email cannot be constructed, so it cannot reach the
-  persistence layer.
+- **Value Object** (`Email`, `Password`, `Uuid`): primitivos inmutables que
+  se autovalidan. No es posible construir un email inválido, por lo que no
+  puede llegar a la capa de persistencia.
 
-- **Mapper** (`infrastructure/persistence/*.mapper.ts`): explicit ORM ↔ Domain
-  translation. The schema can evolve (column rename, snake_case, audit fields)
-  without rippling into the domain.
+- **Mapper** (`infrastructure/persistence/*.mapper.ts`): traducción explícita
+  ORM ↔ Dominio. El esquema puede evolucionar (renombrar columnas, pasar a
+  snake_case, añadir campos de auditoría) sin filtrarse al dominio.
 
-- **Dependency Inversion via tokens** (string constants exported next to the
-  port, bound via `useFactory` in modules). Use cases never `@Inject` —
-  the application layer stays framework-agnostic. The Nest module is the only
-  thing that maps `USER_REPOSITORY` → `TypeOrmUserRepository`.
-
-- **Global exception filter** (`shared/infrastructure/filters/`): one place
-  maps `DomainError` subtypes to HTTP. Use cases throw domain errors and
-  know nothing about Express.
-
-## SOLID — where it shows up
-
-- **SRP**: each use case does one thing. Compare `RegisterUserUseCase` and
-  `LoginUserUseCase` — no shared base class, no helper struts.
-- **OCP**: swap bcrypt for argon2 by binding `PASSWORD_HASHER` to a new
-  adapter. Use cases are untouched.
-- **LSP**: `InMemoryUserRepository` and `TypeOrmUserRepository` satisfy the
-  same `UserRepository` interface. The tests prove this by running against
-  the in-memory one.
-- **ISP**: `PasswordHasher` has exactly `hash` and `compare`. No
-  `generateSalt`, no `validateStrength`.
-- **DIP**: use cases depend on `UserRepository` (the interface), never on
+- **Inversión de dependencias mediante tokens** (constantes string exportadas
+  junto al port, ligadas con `useFactory` en los módulos). Los use cases
+  nunca usan `@Inject` — la capa application se mantiene agnóstica al
+  framework. El módulo Nest es lo único que mapea `USER_REPOSITORY` →
   `TypeOrmUserRepository`.
 
-## Error → HTTP mapping
+- **Exception filter global** (`shared/infrastructure/filters/`): un único
+  lugar mapea los subtipos de `DomainError` a HTTP. Los use cases lanzan
+  errores de dominio y no saben nada de Express.
 
-| Domain error                           | HTTP |
+## SOLID — dónde se ve
+
+- **SRP**: cada use case hace una sola cosa. Comparar `RegisterUserUseCase` y
+  `LoginUserUseCase` — sin clase base común, sin helpers compartidos.
+- **OCP**: cambiar bcrypt por argon2 = enlazar `PASSWORD_HASHER` a un nuevo
+  adaptador. Los use cases no se tocan.
+- **LSP**: `InMemoryUserRepository` y `TypeOrmUserRepository` satisfacen la
+  misma interfaz `UserRepository`. Los tests lo demuestran ejecutándose
+  contra el fake en memoria.
+- **ISP**: `PasswordHasher` tiene exactamente `hash` y `compare`. Sin
+  `generateSalt`, sin `validateStrength`.
+- **DIP**: los use cases dependen de `UserRepository` (la interfaz), nunca
+  de `TypeOrmUserRepository`.
+
+## Mapeo Error → HTTP
+
+| Error de dominio                       | HTTP |
 |----------------------------------------|------|
 | `ValidationError`                      | 400  |
 | `UnauthorizedError` / `InvalidCredentialsError` | 401  |
 | `NotFoundError` / `TaskNotFoundError`  | 404  |
 | `ConflictError` / `UserAlreadyExistsError` | 409  |
-| (unhandled)                            | 500  |
+| (no manejado)                          | 500  |
 
 ## Trade-offs
 
-This architecture is **not free**:
+Esta arquitectura **no es gratis**:
 
-- More files. A "create task" path touches a controller, a use case, a
-  domain entity, a repository interface, a TypeORM entity, and a mapper.
-- Two parallel models (`User` domain vs `UserOrmEntity`) require a mapper
-  to be kept in sync.
-- Indirection has a cost when reading code: jumping from controller to
-  use case to port to adapter takes more clicks than a `service.do()`.
+- Más archivos. La ruta de "crear una task" toca un controller, un use case,
+  una entidad de dominio, una interfaz de repository, una entidad de TypeORM
+  y un mapper.
+- Dos modelos paralelos (`User` de dominio vs. `UserOrmEntity`) requieren un
+  mapper que hay que mantener sincronizado.
+- La indirección tiene coste de lectura: saltar de controller a use case, a
+  port y a adaptador requiere más clics que un `service.do()`.
 
-**When I would not use it:** a simple CRUD with no business rules — a thin
-NestJS service hitting TypeORM directly is faster to write and easier to
-read. Clean Architecture earns its keep when the domain has rules, when
-adapters are likely to change, or when the test surface needs to be
-decoupled from infrastructure.
+**Cuándo no la usaría:** un CRUD simple sin reglas de negocio — un service
+delgado de NestJS golpeando TypeORM directamente se escribe más rápido y se
+lee mejor. Clean Architecture vale la pena cuando el dominio tiene reglas,
+cuando los adaptadores van a cambiar, o cuando la superficie de testing
+necesita desacoplarse de la infraestructura.
 
-## What I deliberately left out
+## Lo que dejé fuera deliberadamente
 
-- **Refresh tokens** — out of scope for a "register/login" demo. Adding them
-  would mean another port (`RefreshTokenStore`) and rotation rules.
-- **Roles / permissions** — no use case here distinguishes them.
-- **Pagination / soft delete on tasks** — would clutter the example without
-  demonstrating anything new.
-- **Domain events / CQRS** — both contexts are too small to need them. Would
-  be theatre, not architecture.
-- **Swagger, rate limiting, health checks, metrics, OAuth, Passport** — not
-  the point of the exercise.
+- **Refresh tokens** — fuera del alcance para una demo de "register/login".
+  Añadirlos implicaría otro port (`RefreshTokenStore`) y reglas de rotación.
+- **Roles / permisos** — ningún use case aquí los distingue.
+- **Paginación / soft delete en tasks** — ensuciarían el ejemplo sin
+  demostrar nada nuevo.
+- **Domain events / CQRS** — ambos contextos son demasiado pequeños para
+  necesitarlos. Sería teatro, no arquitectura.
+- **Swagger, rate limiting, health checks, métricas, OAuth, Passport** — no
+  es el objetivo del ejercicio.
 
-## Running it
+## Cómo ejecutarlo
 
 ```bash
-# 1. Start Postgres
+# 1. Arrancar Postgres
 docker-compose up -d
 
-# 2. Configure env
+# 2. Configurar variables de entorno
 cp .env.example .env
 
-# 3. Install + run
+# 3. Instalar y correr
 npm install
 npm run start:dev     # http://localhost:3000
 
-# 4. Tests (no DB needed — they use in-memory fakes)
+# 4. Tests (sin BD — usan fakes en memoria)
 npm test
 ```
 
-> Migrations: TypeORM `synchronize: true` is enabled for the demo. In real
-> projects you would generate migrations with `typeorm migration:generate`
-> and disable `synchronize`.
+> Migraciones: en la demo `synchronize: true` de TypeORM está activado. En
+> proyectos reales generarías migraciones con `typeorm migration:generate` y
+> desactivarías `synchronize`.
 
-## End-to-end with curl
+## Flujo end-to-end con curl
 
 ```bash
-# Register
+# Registro
 curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"alice@example.com","password":"sup3rsecret"}'
@@ -154,36 +157,36 @@ curl -X POST http://localhost:3000/auth/login \
   -d '{"email":"alice@example.com","password":"sup3rsecret"}'
 # → 200  {"accessToken":"eyJhbGciOi..."}
 
-TOKEN="eyJ..."   # paste the accessToken
+TOKEN="eyJ..."   # pega aquí el accessToken
 
-# Create a task
+# Crear una task
 curl -X POST http://localhost:3000/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"Buy milk","description":"2L"}'
 
-# List tasks
+# Listar tasks
 curl http://localhost:3000/tasks -H "Authorization: Bearer $TOKEN"
 
-# Get one (replace :id)
+# Obtener una (sustituye :id)
 curl http://localhost:3000/tasks/<id> -H "Authorization: Bearer $TOKEN"
 
-# Update
+# Actualizar
 curl -X PATCH http://localhost:3000/tasks/<id> \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"completed":true}'
 
-# Delete
+# Eliminar
 curl -X DELETE http://localhost:3000/tasks/<id> -H "Authorization: Bearer $TOKEN"
 # → 204
 ```
 
-## Folder layout (skeleton)
+## Estructura de carpetas (esqueleto)
 
 ```
 src/
-├── main.ts                          # global ValidationPipe + DomainExceptionFilter
+├── main.ts                          # ValidationPipe global + DomainExceptionFilter
 ├── app.module.ts                    # composition root
 │
 ├── shared/
